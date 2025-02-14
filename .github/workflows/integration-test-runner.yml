@@ -1,0 +1,116 @@
+name: Integration Test Runner Without PRs
+
+on:
+  workflow_dispatch:
+    inputs:
+      jdk:
+        description: "Enter Java version (ex: 8,11)"
+        default: "11"
+        required: true
+
+env:
+  MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.class=standard -Dmaven.wagon.http.retryHandler.count=3 -Djdk.util.zip.disableZip64ExtraFieldValidation=true -XX:+HeapDumpOnOutOfMemoryError
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      JAVA_TOOL_OPTIONS: "-Djdk.util.zip.disableZip64ExtraFieldValidation=true -Djdk.nio.zipfs.allowDotZipEntry=true"
+
+    steps:
+      - name: Print Input
+        run: echo Running the integration test runner
+      - uses: actions/checkout@v4
+      - name: Set up Adopt JDK 8
+        uses: actions/setup-java@v4
+        with:
+          java-version: "8"
+          distribution: "adopt"
+      - name: Echo java 8 home
+        run: |
+          echo "J8HOME=$JAVA_HOME" >> ${GITHUB_ENV}
+        id: java-8-setup
+      - name: Set up Adopt JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: "11"
+          distribution: "adopt"
+      - name: Echo java 11 home
+        run: |
+          echo "J11HOME=$JAVA_HOME" >> ${GITHUB_ENV}
+      - name: Build init
+        run: |
+          echo "CURRENT_MONTH=$(date +%Y-%m)" >> ${GITHUB_ENV}
+      - name: Cache maven packages
+        id: cache-maven-m2
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2
+            !~/.m2/repository/org/wso2/is/wso2is
+          key: ${{ runner.os }}-pr-builder-${{ env.CURRENT_MONTH }}
+      - name: Setup pnpm
+        id: setup-pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+          run_install: false
+      - name: Run Integration tests
+        id: builder_step
+        env:
+          JDK_VERSION: ${{github.event.inputs.jdk}}
+          JAVA_8_HOME: ${{env.J8HOME}}
+          JAVA_11_HOME: ${{env.J11HOME}}
+        run: |
+          wget https://raw.githubusercontent.com/AmshikaH/wso2-product-is/master/.github/scripts/test-runner.sh
+          bash test-runner.sh
+      - name: Archive PR diff file
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-pr-diff
+          path: |
+            ${{steps.builder_step.outputs.REPO_NAME}}/diff.diff
+          if-no-files-found: warn
+      - name: Archive repo mvn build log
+        if: always() && steps.builder_step.outputs.REPO_NAME != 'wso2-product-is'
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-mvn-build-log
+          path: |
+            ${{steps.builder_step.outputs.REPO_NAME}}/mvn-build.log
+          if-no-files-found: warn
+      - name: Archive repo surefire reports
+        if: always() && steps.builder_step.outputs.REPO_NAME != 'wso2-product-is'
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-surefire-report
+          path: |
+            ${{steps.builder_step.outputs.REPO_NAME}}/**/surefire-reports
+          if-no-files-found: warn
+      - name: Archive product-is mvn build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-is-mvn-build-log
+          path: |
+            wso2-product-is/mvn-build.log
+          if-no-files-found: warn
+      - name: Archive product-is surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-is-surefire-report
+          path: |
+            wso2-product-is/**/surefire-reports
+          if-no-files-found: warn
+      - name: Archive heap dump
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heap-dump
+          path: |
+            **/**.hprof
+          if-no-files-found: ignore
